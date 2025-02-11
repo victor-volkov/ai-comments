@@ -24,34 +24,26 @@ client = tweepy.Client(
 def get_trending_tweets():
     """Get tweets that are receiving high engagement in the last 10 hours"""
     try:
-        # Fix datetime usage with proper timezone
-        start_time = datetime.now(timezone.utc) - timedelta(hours=10)
-        
-        # Add rate limit handling
-        try:
-            # Check rate limit status
-            limits = client.get_recent_tweets_count("test")  # Light API call to check status
-        except tweepy.TooManyRequests as e:
-            wait_time = int(e.response.headers.get('x-rate-limit-reset', 900))  # Default to 15 mins
-            st.warning(f"Rate limited. Please try again in {wait_time} seconds.")
-            return []
-            
-        # Modified search query to be even less demanding
-        query = "(min_faves:10 OR min_retweets:5) -is:retweet lang:en"
+        # Reduce query to minimize API usage
+        query = "(min_faves:50) -is:retweet lang:en"
         
         tweets = client.search_recent_tweets(
             query=query,
-            start_time=start_time,
             tweet_fields=['public_metrics', 'created_at', 'text'],
-            max_results=5,  # Reduced from 10 to help with rate limits
+            max_results=3,  # Reduced further to conserve quota
             user_fields=['username', 'name'],
             expansions=['author_id']
         )
         
-        if not tweets.data:
-            return []
-            
-        return tweets.data
+        # Add monthly tweet counter
+        if 'monthly_tweets' not in st.session_state:
+            st.session_state.monthly_tweets = 0
+        st.session_state.monthly_tweets += len(tweets.data or [])
+        
+        # Show usage in sidebar
+        st.sidebar.write(f"Monthly Tweet Usage: {st.session_state.monthly_tweets}/1500")
+        
+        return tweets.data if tweets.data else []
         
     except tweepy.TooManyRequests as e:
         st.error("Twitter API rate limit reached. Please try again later.")
