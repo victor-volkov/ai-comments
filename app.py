@@ -30,7 +30,7 @@ def get_trending_tweets():
         tweets = client.search_recent_tweets(
             query=query,
             tweet_fields=['public_metrics', 'created_at', 'text'],
-            max_results=3,  # Reduced further to conserve quota
+            max_results=10,  # Reduced further to conserve quota
             user_fields=['username', 'name'],
             expansions=['author_id']
         )
