@@ -6,7 +6,7 @@ import time
 
 # Configure API keys
 twitter_bearer_token = st.secrets["TWITTER_BEARER_TOKEN"]
-twitter_api_key = st.secrets["CaSx2wfSV8mHC4yrxroEliNht"]
+twitter_api_key = st.secrets["TWITTER_API_KEY"]
 twitter_api_secret = st.secrets["TWITTER_API_SECRET"]
 twitter_access_token = st.secrets["TWITTER_ACCESS_TOKEN"]
 twitter_access_token_secret = st.secrets["TWITTER_ACCESS_TOKEN_SECRET"]
