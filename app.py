@@ -1,5 +1,8 @@
 import streamlit as st
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.core.utils import ChromeType
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -15,17 +18,40 @@ openai_api_key = st.secrets["OPENAI_API_KEY"]
 
 def setup_driver():
     """Setup Chrome driver with necessary options"""
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--window-size=1920x1080")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-    
-    driver = webdriver.Chrome(options=chrome_options)
-    driver.implicitly_wait(10)
-    return driver
+    try:
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--window-size=1920x1080")
+        chrome_options.add_argument("--disable-extensions")
+        chrome_options.add_argument("--disable-infobars")
+        chrome_options.add_argument("--remote-debugging-port=9222")
+        chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
+
+        # Install ChromeDriver using webdriver_manager
+        service = Service(ChromeDriverManager().install())
+        
+        # Create driver with error handling
+        try:
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+            driver.implicitly_wait(10)
+            return driver
+        except Exception as e:
+            st.error(f"Failed to create Chrome driver: {str(e)}")
+            st.info("Attempting to use alternative Chrome installation...")
+            
+            # Try alternative Chrome installation
+            service = Service(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+            driver.implicitly_wait(10)
+            return driver
+            
+    except Exception as e:
+        st.error(f"Failed to setup Chrome driver: {str(e)}")
+        st.error("Please make sure Chrome is installed on your system.")
+        return None
 
 def login_twitter(driver, username, password):
     """Login to Twitter"""
@@ -193,7 +219,11 @@ def main():
         st.session_state.logged_in = False
     
     if 'driver' not in st.session_state:
-        st.session_state.driver = setup_driver()
+        driver = setup_driver()
+        if driver is None:
+            st.error("Could not initialize browser. Please try again later.")
+            return
+        st.session_state.driver = driver
     
     # Login section in sidebar
     with st.sidebar:
