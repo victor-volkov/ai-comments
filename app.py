@@ -16,6 +16,14 @@ from datetime import datetime
 # Configure OpenAI
 openai_api_key = st.secrets["OPENAI_API_KEY"]
 
+COMMENT_TONES = {
+    "Friendly": "You are a friendly and supportive Twitter user.",
+    "Professional": "You are a knowledgeable professional providing insights.",
+    "Humorous": "You are a witty Twitter user who adds humor to discussions.",
+    "Empathetic": "You are an empathetic person who shows understanding.",
+    "Analytical": "You are an analytical thinker who provides thoughtful perspectives."
+}
+
 def setup_driver():
     """Setup Chrome driver with necessary options"""
     try:
@@ -168,21 +176,26 @@ def get_trending_tweets(driver, num_tweets=5):
 def post_comment(driver, tweet_link, comment):
     """Post comment using Selenium"""
     try:
+        if not comment:
+            return False, "No comment generated"
+            
         # Go to tweet
         driver.get(tweet_link)
-        time.sleep(random.uniform(2, 4))  # Random delay to appear more human-like
+        time.sleep(random.uniform(2, 4))
         
-        # Find reply button and click
+        # Find and click reply button
         reply_button = WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-testid="reply"]'))
         )
-        reply_button.click()
+        driver.execute_script("arguments[0].click();", reply_button)
         time.sleep(1)
         
-        # Find reply input and enter comment
+        # Find and click the reply input field
         reply_input = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, '[data-testid="tweetTextarea_0"]'))
         )
+        driver.execute_script("arguments[0].click();", reply_input)
+        
         # Type comment with random delays
         for char in comment:
             reply_input.send_keys(char)
@@ -191,39 +204,78 @@ def post_comment(driver, tweet_link, comment):
         time.sleep(1)
         
         # Find and click reply submit button
-        submit_button = driver.find_element(By.CSS_SELECTOR, '[data-testid="tweetButton"]')
-        submit_button.click()
+        submit_button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-testid="tweetButton"]'))
+        )
+        driver.execute_script("arguments[0].click();", submit_button)
         
         time.sleep(2)
         return True, "Comment posted successfully!"
         
     except Exception as e:
+        st.error(f"Error details: {str(e)}")
         return False, f"Error posting comment: {str(e)}"
 
-def generate_comment(tweet_text):
-    """Generate a meaningful comment using GPT"""
-    openai.api_key = openai_api_key
-    
-    prompt = f"""
-    Generate a thoughtful and engaging comment for the following tweet. 
-    The comment should be relevant, respectful, and add value to the conversation.
-    
-    Tweet: {tweet_text}
-    
-    Comment:
-    """
-    
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant that generates engaging social media comments."},
-            {"role": "user", "content": prompt}
-        ],
-        max_tokens=100,
-        temperature=0.7
-    )
-    
-    return response.choices[0].message.content.strip()
+def generate_comment(tweet_text, tone="Friendly", custom_instructions=""):
+    """Generate a meaningful comment using GPT with customizable tone"""
+    try:
+        openai.api_key = st.secrets["OPENAI_API_KEY"]
+        
+        system_message = COMMENT_TONES.get(tone, COMMENT_TONES["Friendly"])
+        if custom_instructions:
+            system_message += f" Additional instructions: {custom_instructions}"
+        
+        prompt = f"""
+        Generate a short, engaging comment (max 2 sentences) for this tweet.
+        Make it sound natural and conversational.
+        
+        Tweet: {tweet_text}
+        
+        Rules:
+        - Keep it under 240 characters
+        - Be positive and constructive
+        - Don't use hashtags
+        - Sound natural, not corporate
+        - Don't repeat the tweet content
+        - Match the specified tone: {tone}
+        """
+        
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=60,
+            temperature=0.7,
+            presence_penalty=0.6
+        )
+        
+        comment = response.choices[0].message.content.strip()
+        
+        if len(comment) > 240:
+            comment = comment[:237] + "..."
+            
+        return comment
+        
+    except Exception as e:
+        st.error(f"Error generating comment: {str(e)}")
+        return None
+
+def save_session_cookies():
+    """Save session cookies to Streamlit session state"""
+    if 'driver' in st.session_state:
+        cookies = st.session_state.driver.get_cookies()
+        st.session_state.twitter_cookies = cookies
+
+def restore_session_cookies():
+    """Restore session cookies to the driver"""
+    if 'twitter_cookies' in st.session_state and st.session_state.driver:
+        for cookie in st.session_state.twitter_cookies:
+            try:
+                st.session_state.driver.add_cookie(cookie)
+            except Exception as e:
+                st.sidebar.warning(f"Failed to restore cookie: {str(e)}")
 
 def main():
     st.title("Twitter Auto-Commenter (Selenium Version)")
@@ -231,6 +283,8 @@ def main():
     # Initialize session state
     if 'logged_in' not in st.session_state:
         st.session_state.logged_in = False
+    if 'twitter_cookies' not in st.session_state:
+        st.session_state.twitter_cookies = None
     
     if 'driver' not in st.session_state:
         driver = setup_driver()
@@ -238,6 +292,8 @@ def main():
             st.error("Could not initialize browser. Please try again later.")
             return
         st.session_state.driver = driver
+        if st.session_state.twitter_cookies:
+            restore_session_cookies()
     
     # Login section in sidebar
     with st.sidebar:
@@ -250,6 +306,7 @@ def main():
                 success, message = login_twitter(st.session_state.driver, username, password)
                 if success:
                     st.session_state.logged_in = True
+                    save_session_cookies()  # Save cookies after successful login
                     st.success(message)
                 else:
                     st.error(message)
@@ -257,11 +314,18 @@ def main():
             st.success("Logged in successfully!")
             if st.button("Logout"):
                 st.session_state.logged_in = False
+                st.session_state.twitter_cookies = None
                 st.session_state.driver.delete_all_cookies()
                 st.experimental_rerun()
     
     # Main content
     if st.session_state.logged_in:
+        # Add comment generation options
+        st.sidebar.header("Comment Settings")
+        selected_tone = st.sidebar.selectbox("Comment Tone", list(COMMENT_TONES.keys()))
+        custom_instructions = st.sidebar.text_area("Custom Instructions (Optional)", 
+            help="Add any specific instructions for comment generation")
+        
         col1, col2 = st.columns(2)
         with col1:
             num_tweets = st.number_input("Number of tweets to fetch", min_value=1, max_value=10, value=5)
@@ -271,8 +335,6 @@ def main():
         if st.button("Get Trending Tweets"):
             with st.spinner("Fetching tweets..."):
                 tweets = get_trending_tweets(st.session_state.driver, num_tweets)
-                
-                # Filter tweets by likes
                 tweets = [t for t in tweets if int(t['likes'].replace('K', '000').replace('.', '')) >= min_likes]
                 
                 if not tweets:
@@ -287,21 +349,54 @@ def main():
                     
                     if tweet['text'].strip():
                         with st.spinner("Generating comment..."):
-                            comment = generate_comment(tweet['text'])
-                            st.write(f"**Generated Comment:** {comment}")
-                        
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            if st.button(f"Post Comment", key=f"post_{tweet['id']}"):
-                                success, message = post_comment(st.session_state.driver, tweet['link'], comment)
-                                if success:
-                                    st.success(message)
-                                else:
-                                    st.error(message)
-                        with col2:
-                            st.markdown(f"[View Tweet]({tweet['link']})")
+                            generated_comment = generate_comment(
+                                tweet['text'], 
+                                tone=selected_tone,
+                                custom_instructions=custom_instructions
+                            )
+                            
+                            if generated_comment:
+                                # Add comment preview and edit functionality
+                                comment_key = f"comment_{tweet['id']}"
+                                edited_comment = st.text_area(
+                                    "Edit Comment Before Posting:",
+                                    value=generated_comment,
+                                    key=comment_key,
+                                    max_chars=240
+                                )
+                                
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    if st.button("Regenerate", key=f"regen_{tweet['id']}"):
+                                        st.session_state[comment_key] = generate_comment(
+                                            tweet['text'],
+                                            tone=selected_tone,
+                                            custom_instructions=custom_instructions
+                                        )
+                                        st.experimental_rerun()
+                                
+                                with col2:
+                                    if st.button(f"Post Comment", key=f"post_{tweet['id']}"):
+                                        with st.spinner("Posting comment..."):
+                                            success, message = post_comment(
+                                                st.session_state.driver,
+                                                tweet['link'],
+                                                edited_comment
+                                            )
+                                            if success:
+                                                st.success(message)
+                                            else:
+                                                st.error(message)
+                                
+                                with col3:
+                                    st.markdown(f"[View Tweet]({tweet['link']})")
+                            else:
+                                st.error("Failed to generate comment")
     else:
         st.warning("Please login first to use the tool.")
+
+    # Save session before shutdown
+    save_session_cookies()
 
     # Cleanup on app shutdown
     def cleanup():
