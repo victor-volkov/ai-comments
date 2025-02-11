@@ -1,7 +1,7 @@
 import streamlit as st
 import tweepy
 import openai
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import time
 
 # Configure API keys
@@ -24,8 +24,8 @@ client = tweepy.Client(
 def get_trending_tweets():
     """Get tweets that are receiving high engagement in the last 10 hours"""
     try:
-        # Fix deprecated datetime.utcnow() usage
-        start_time = datetime.now(datetime.UTC) - timedelta(hours=10)
+        # Fix datetime usage with proper timezone
+        start_time = datetime.now(timezone.utc) - timedelta(hours=10)
         
         # Add rate limit handling
         try:
