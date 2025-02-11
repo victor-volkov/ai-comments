@@ -1,76 +1,164 @@
 import streamlit as st
-import tweepy
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.keys import Keys
 import openai
-from datetime import datetime, timedelta, timezone
 import time
+import random
+from datetime import datetime
 
-# Configure API keys
-twitter_bearer_token = st.secrets["TWITTER_BEARER_TOKEN"]
-twitter_api_key = st.secrets["TWITTER_API_KEY"]
-twitter_api_secret = st.secrets["TWITTER_API_SECRET"]
-twitter_access_token = st.secrets["TWITTER_ACCESS_TOKEN"]
-twitter_access_token_secret = st.secrets["TWITTER_ACCESS_TOKEN_SECRET"]
+# Configure OpenAI
 openai_api_key = st.secrets["OPENAI_API_KEY"]
 
-# Initialize Twitter client
-client = tweepy.Client(
-    bearer_token=twitter_bearer_token,
-    consumer_key=twitter_api_key,
-    consumer_secret=twitter_api_secret,
-    access_token=twitter_access_token,
-    access_token_secret=twitter_access_token_secret
-)
+def setup_driver():
+    """Setup Chrome driver with necessary options"""
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--window-size=1920x1080")
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+    
+    driver = webdriver.Chrome(options=chrome_options)
+    driver.implicitly_wait(10)
+    return driver
 
-def get_trending_tweets():
-    """Get tweets that are receiving high engagement in the last 10 hours"""
+def login_twitter(driver, username, password):
+    """Login to Twitter"""
     try:
-        # More lenient query
-        query = "lang:en -is:retweet"  # Removed minimum likes requirement
-        
-        tweets = client.search_recent_tweets(
-            query=query,
-            tweet_fields=['public_metrics', 'created_at', 'text'],
-            max_results=2,  # Reduced to minimum
-            user_fields=['username', 'name'],
-            expansions=['author_id']
+        # Go to Twitter login page
+        driver.get("https://twitter.com/i/flow/login")
+        time.sleep(3)  # Wait for page load
+
+        # Enter username
+        username_input = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, 'input[autocomplete="username"]'))
+        )
+        username_input.send_keys(username)
+        username_input.send_keys(Keys.RETURN)
+        time.sleep(2)
+
+        # Handle possible security check
+        try:
+            security_input = WebDriverWait(driver, 5).until(
+                EC.presence_of_element_located((By.NAME, "text"))
+            )
+            st.warning("Security check detected! Please enter your email or phone.")
+            security_value = st.text_input("Email/Phone:")
+            if security_value:
+                security_input.send_keys(security_value)
+                security_input.send_keys(Keys.RETURN)
+                time.sleep(2)
+        except:
+            pass  # No security check needed
+
+        # Enter password
+        password_input = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, 'input[name="password"]'))
+        )
+        password_input.send_keys(password)
+        password_input.send_keys(Keys.RETURN)
+        time.sleep(3)
+
+        # Verify login success
+        try:
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, '[data-testid="SideNav_NewTweet_Button"]'))
+            )
+            return True, "Login successful!"
+        except:
+            return False, "Login failed. Please check your credentials."
+
+    except Exception as e:
+        return False, f"Login error: {str(e)}"
+
+def get_trending_tweets(driver, num_tweets=5):
+    """Get trending tweets using Selenium"""
+    tweets = []
+    try:
+        # Go to Twitter explore page with trending tab
+        driver.get("https://twitter.com/explore/tabs/trending")
+        time.sleep(3)
+
+        # Scroll a few times to load more tweets
+        for _ in range(3):
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(1)
+
+        # Find tweet elements
+        tweet_elements = WebDriverWait(driver, 10).until(
+            EC.presence_of_all_elements_located((By.CSS_SELECTOR, '[data-testid="tweet"]'))
         )
         
-        # Add monthly tweet counter
-        if 'monthly_tweets' not in st.session_state:
-            st.session_state.monthly_tweets = 0
-        
-        if tweets.data:
-            st.session_state.monthly_tweets += len(tweets.data)
-            # Show usage in sidebar
-            st.sidebar.write(f"Monthly Tweet Usage: {st.session_state.monthly_tweets}/1500")
-            
-            # Debug information
-            st.sidebar.write("Latest tweets found:", len(tweets.data))
-            for tweet in tweets.data:
-                st.sidebar.write(f"Tweet likes: {tweet.public_metrics['like_count']}")
-        else:
-            st.sidebar.warning("No tweets found with current criteria")
-        
-        return tweets.data if tweets.data else []
-        
-    except tweepy.TooManyRequests as e:
-        st.error("""
-        Twitter API rate limit reached. Basic tier limits:
-        - 1,500 tweets/month
-        - 1 request/second
-        Consider waiting a few minutes or upgrading to Elevated access.
-        """)
-        # Debug information
-        st.sidebar.error(f"Rate limit details: {str(e)}")
-        return []
-    except tweepy.Unauthorized as e:
-        st.error("Authentication error. Please check your Twitter API credentials.")
-        st.sidebar.error(f"Auth error details: {str(e)}")
-        return []
+        for element in tweet_elements[:num_tweets]:
+            try:
+                # Get tweet text
+                text = element.find_element(By.CSS_SELECTOR, '[data-testid="tweetText"]').text
+                
+                # Get engagement metrics
+                likes = element.find_element(By.CSS_SELECTOR, '[data-testid="like"]').text or "0"
+                retweets = element.find_element(By.CSS_SELECTOR, '[data-testid="retweet"]').text or "0"
+                
+                # Get tweet link and author
+                link = element.find_element(By.CSS_SELECTOR, 'a[href*="/status/"]').get_attribute('href')
+                author = element.find_element(By.CSS_SELECTOR, '[data-testid="User-Name"]').text.split('\n')[0]
+                
+                tweets.append({
+                    'id': link.split('/')[-1],
+                    'text': text,
+                    'likes': likes,
+                    'retweets': retweets,
+                    'link': link,
+                    'author': author
+                })
+                
+            except Exception as e:
+                st.sidebar.warning(f"Error parsing tweet: {str(e)}")
+                continue
+                
     except Exception as e:
         st.error(f"Error fetching tweets: {str(e)}")
-        st.sidebar.error(f"Full error details: {str(e)}")
-        return []
+    
+    return tweets
+
+def post_comment(driver, tweet_link, comment):
+    """Post comment using Selenium"""
+    try:
+        # Go to tweet
+        driver.get(tweet_link)
+        time.sleep(random.uniform(2, 4))  # Random delay to appear more human-like
+        
+        # Find reply button and click
+        reply_button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-testid="reply"]'))
+        )
+        reply_button.click()
+        time.sleep(1)
+        
+        # Find reply input and enter comment
+        reply_input = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, '[data-testid="tweetTextarea_0"]'))
+        )
+        # Type comment with random delays
+        for char in comment:
+            reply_input.send_keys(char)
+            time.sleep(random.uniform(0.01, 0.08))
+        
+        time.sleep(1)
+        
+        # Find and click reply submit button
+        submit_button = driver.find_element(By.CSS_SELECTOR, '[data-testid="tweetButton"]')
+        submit_button.click()
+        
+        time.sleep(2)
+        return True, "Comment posted successfully!"
+        
+    except Exception as e:
+        return False, f"Error posting comment: {str(e)}"
 
 def generate_comment(tweet_text):
     """Generate a meaningful comment using GPT"""
@@ -97,89 +185,86 @@ def generate_comment(tweet_text):
     
     return response.choices[0].message.content.strip()
 
-def post_comment(tweet_id, comment):
-    """Post the generated comment as a reply to the tweet"""
-    try:
-        response = client.create_tweet(
-            text=comment,
-            in_reply_to_tweet_id=tweet_id
-        )
-        return True, "Comment posted successfully!"
-    except Exception as e:
-        return False, f"Error posting comment: {str(e)}"
-
-# Streamlit interface
 def main():
-    st.title("Twitter Auto-Commenter")
+    st.title("Twitter Auto-Commenter (Selenium Version)")
     
-    # Add debug information
-    st.sidebar.write("API Status:")
-    try:
-        # Test Twitter API connection
-        user = client.get_me()
-        st.sidebar.success(f"Twitter API Connected (User: @{user.data.username})")
-        
-        # Add rate limit information
-        st.sidebar.info("""
-        Basic Tier Limits:
-        - 1,500 tweets/month total
-        - 1 request/second
-        - 50 tweets/day for posting
-        
-        To avoid rate limits:
-        1. Wait 1-2 minutes between requests
-        2. Use the tool sparingly
-        3. Consider applying for Elevated access
-        """)
-        
-    except tweepy.TooManyRequests:
-        st.sidebar.error("""
-        Rate limited. Basic tier limitations:
-        - Wait at least 1 minute between requests
-        - Maximum 1,500 tweets per month
-        """)
-    except tweepy.Unauthorized:
-        st.sidebar.error("Authentication failed. Check API credentials.")
-    except Exception as e:
-        st.sidebar.error(f"Twitter API Error: {str(e)}")
+    # Initialize session state
+    if 'logged_in' not in st.session_state:
+        st.session_state.logged_in = False
     
-    # Add a delay between requests button
-    if 'last_request_time' not in st.session_state:
-        st.session_state.last_request_time = 0
-        
-    current_time = time.time()
-    time_since_last_request = current_time - st.session_state.last_request_time
+    if 'driver' not in st.session_state:
+        st.session_state.driver = setup_driver()
     
-    if time_since_last_request < 60:  # 1 minute cooldown
-        st.warning(f"Please wait {60 - int(time_since_last_request)} seconds before making another request")
-        st.button("Get Trending Tweets", disabled=True)
-    else:
+    # Login section in sidebar
+    with st.sidebar:
+        st.header("Twitter Login")
+        if not st.session_state.logged_in:
+            username = st.text_input("Username/Email")
+            password = st.text_input("Password", type="password")
+            
+            if st.button("Login"):
+                success, message = login_twitter(st.session_state.driver, username, password)
+                if success:
+                    st.session_state.logged_in = True
+                    st.success(message)
+                else:
+                    st.error(message)
+        else:
+            st.success("Logged in successfully!")
+            if st.button("Logout"):
+                st.session_state.logged_in = False
+                st.session_state.driver.delete_all_cookies()
+                st.experimental_rerun()
+    
+    # Main content
+    if st.session_state.logged_in:
+        col1, col2 = st.columns(2)
+        with col1:
+            num_tweets = st.number_input("Number of tweets to fetch", min_value=1, max_value=10, value=5)
+        with col2:
+            min_likes = st.number_input("Minimum likes", min_value=0, value=100)
+        
         if st.button("Get Trending Tweets"):
-            st.session_state.last_request_time = current_time
             with st.spinner("Fetching tweets..."):
-                tweets = get_trending_tweets()
+                tweets = get_trending_tweets(st.session_state.driver, num_tweets)
+                
+                # Filter tweets by likes
+                tweets = [t for t in tweets if int(t['likes'].replace('K', '000').replace('.', '')) >= min_likes]
                 
                 if not tweets:
-                    st.warning("No trending tweets found. This could be due to API limits or no tweets matching criteria.")
+                    st.warning("No tweets found matching your criteria.")
                     return
-                    
+                
                 for tweet in tweets:
                     st.markdown("---")
-                    st.write(f"**Tweet:** {tweet.text}")
-                    if hasattr(tweet, 'public_metrics'):
-                        st.write(f"Likes: {tweet.public_metrics['like_count']}")
+                    st.write(f"**Author:** {tweet['author']}")
+                    st.write(f"**Tweet:** {tweet['text']}")
+                    st.write(f"Likes: {tweet['likes']} | Retweets: {tweet['retweets']}")
                     
-                    if tweet.text.strip():  # Check if tweet has text content
+                    if tweet['text'].strip():
                         with st.spinner("Generating comment..."):
-                            comment = generate_comment(tweet.text)
+                            comment = generate_comment(tweet['text'])
                             st.write(f"**Generated Comment:** {comment}")
                         
-                        if st.button(f"Post Comment for Tweet {tweet.id}", key=tweet.id):
-                            success, message = post_comment(tweet.id, comment)
-                            if success:
-                                st.success(message)
-                            else:
-                                st.error(message)
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button(f"Post Comment", key=f"post_{tweet['id']}"):
+                                success, message = post_comment(st.session_state.driver, tweet['link'], comment)
+                                if success:
+                                    st.success(message)
+                                else:
+                                    st.error(message)
+                        with col2:
+                            st.markdown(f"[View Tweet]({tweet['link']})")
+    else:
+        st.warning("Please login first to use the tool.")
+
+    # Cleanup on app shutdown
+    def cleanup():
+        if 'driver' in st.session_state:
+            st.session_state.driver.quit()
+    
+    st.on_script_run_end(cleanup)
 
 if __name__ == "__main__":
     main() 
