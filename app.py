@@ -23,19 +23,30 @@ client = tweepy.Client(
 
 def get_trending_tweets():
     """Get tweets that are receiving high engagement in the last 10 hours"""
-    # Calculate time 10 hours ago
-    start_time = datetime.utcnow() - timedelta(hours=10)
-    
-    # Search for tweets with high engagement
-    query = "min_faves:1000 -is:retweet lang:en"  # You can adjust the minimum likes
-    tweets = client.search_recent_tweets(
-        query=query,
-        start_time=start_time,
-        tweet_fields=['public_metrics', 'created_at', 'text'],
-        max_results=10
-    )
-    
-    return tweets.data if tweets.data else []
+    try:
+        # Calculate time 10 hours ago
+        start_time = datetime.utcnow() - timedelta(hours=10)
+        
+        # Modified search query with more specific parameters
+        query = "(min_faves:100 OR min_retweets:50) -is:retweet lang:en"
+        
+        tweets = client.search_recent_tweets(
+            query=query,
+            start_time=start_time,
+            tweet_fields=['public_metrics', 'created_at', 'text'],
+            max_results=10,
+            user_fields=['username', 'name'],
+            expansions=['author_id']
+        )
+        
+        if not tweets.data:
+            return []
+            
+        return tweets.data
+        
+    except Exception as e:
+        st.error(f"Error fetching tweets: {str(e)}")
+        return []
 
 def generate_comment(tweet_text):
     """Generate a meaningful comment using GPT"""
@@ -77,28 +88,40 @@ def post_comment(tweet_id, comment):
 def main():
     st.title("Twitter Auto-Commenter")
     
+    # Add debug information
+    st.sidebar.write("API Status:")
+    try:
+        # Test Twitter API connection
+        test = client.get_me()
+        st.sidebar.success("Twitter API Connected")
+    except Exception as e:
+        st.sidebar.error(f"Twitter API Error: {str(e)}")
+    
     if st.button("Get Trending Tweets"):
-        tweets = get_trending_tweets()
-        
-        if not tweets:
-            st.warning("No trending tweets found.")
-            return
+        with st.spinner("Fetching tweets..."):
+            tweets = get_trending_tweets()
             
-        for tweet in tweets:
-            st.markdown("---")
-            st.write(f"**Tweet:** {tweet.text}")
-            st.write(f"Likes: {tweet.public_metrics['like_count']}")
-            
-            if tweet.text.strip():  # Check if tweet has text content
-                comment = generate_comment(tweet.text)
-                st.write(f"**Generated Comment:** {comment}")
+            if not tweets:
+                st.warning("No trending tweets found. This could be due to API limits or no tweets matching criteria.")
+                return
                 
-                if st.button(f"Post Comment for Tweet {tweet.id}", key=tweet.id):
-                    success, message = post_comment(tweet.id, comment)
-                    if success:
-                        st.success(message)
-                    else:
-                        st.error(message)
+            for tweet in tweets:
+                st.markdown("---")
+                st.write(f"**Tweet:** {tweet.text}")
+                if hasattr(tweet, 'public_metrics'):
+                    st.write(f"Likes: {tweet.public_metrics['like_count']}")
+                
+                if tweet.text.strip():  # Check if tweet has text content
+                    with st.spinner("Generating comment..."):
+                        comment = generate_comment(tweet.text)
+                        st.write(f"**Generated Comment:** {comment}")
+                    
+                    if st.button(f"Post Comment for Tweet {tweet.id}", key=tweet.id):
+                        success, message = post_comment(tweet.id, comment)
+                        if success:
+                            st.success(message)
+                        else:
+                            st.error(message)
 
 if __name__ == "__main__":
     main() 
