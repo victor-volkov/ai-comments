@@ -24,13 +24,13 @@ client = tweepy.Client(
 def get_trending_tweets():
     """Get tweets that are receiving high engagement in the last 10 hours"""
     try:
-        # Reduce query to minimize API usage
-        query = "(min_faves:50) -is:retweet lang:en"
+        # More lenient query
+        query = "lang:en -is:retweet"  # Removed minimum likes requirement
         
         tweets = client.search_recent_tweets(
             query=query,
             tweet_fields=['public_metrics', 'created_at', 'text'],
-            max_results=10,  # Reduced further to conserve quota
+            max_results=2,  # Reduced to minimum
             user_fields=['username', 'name'],
             expansions=['author_id']
         )
@@ -38,18 +38,38 @@ def get_trending_tweets():
         # Add monthly tweet counter
         if 'monthly_tweets' not in st.session_state:
             st.session_state.monthly_tweets = 0
-        st.session_state.monthly_tweets += len(tweets.data or [])
         
-        # Show usage in sidebar
-        st.sidebar.write(f"Monthly Tweet Usage: {st.session_state.monthly_tweets}/1500")
+        if tweets.data:
+            st.session_state.monthly_tweets += len(tweets.data)
+            # Show usage in sidebar
+            st.sidebar.write(f"Monthly Tweet Usage: {st.session_state.monthly_tweets}/1500")
+            
+            # Debug information
+            st.sidebar.write("Latest tweets found:", len(tweets.data))
+            for tweet in tweets.data:
+                st.sidebar.write(f"Tweet likes: {tweet.public_metrics['like_count']}")
+        else:
+            st.sidebar.warning("No tweets found with current criteria")
         
         return tweets.data if tweets.data else []
         
     except tweepy.TooManyRequests as e:
-        st.error("Twitter API rate limit reached. Please try again later.")
+        st.error("""
+        Twitter API rate limit reached. Basic tier limits:
+        - 1,500 tweets/month
+        - 1 request/second
+        Consider waiting a few minutes or upgrading to Elevated access.
+        """)
+        # Debug information
+        st.sidebar.error(f"Rate limit details: {str(e)}")
+        return []
+    except tweepy.Unauthorized as e:
+        st.error("Authentication error. Please check your Twitter API credentials.")
+        st.sidebar.error(f"Auth error details: {str(e)}")
         return []
     except Exception as e:
         st.error(f"Error fetching tweets: {str(e)}")
+        st.sidebar.error(f"Full error details: {str(e)}")
         return []
 
 def generate_comment(tweet_text):
@@ -95,19 +115,31 @@ def main():
     # Add debug information
     st.sidebar.write("API Status:")
     try:
-        # Test Twitter API connection with rate limit info
-        test = client.get_me()
-        st.sidebar.success("Twitter API Connected")
+        # Test Twitter API connection
+        user = client.get_me()
+        st.sidebar.success(f"Twitter API Connected (User: @{user.data.username})")
         
         # Add rate limit information
         st.sidebar.info("""
-        Twitter API Rate Limits:
-        - Search tweets: 180 requests/15-min window
-        - Post tweets: 50 tweets/24 hours
+        Basic Tier Limits:
+        - 1,500 tweets/month total
+        - 1 request/second
+        - 50 tweets/day for posting
+        
+        To avoid rate limits:
+        1. Wait 1-2 minutes between requests
+        2. Use the tool sparingly
+        3. Consider applying for Elevated access
         """)
         
     except tweepy.TooManyRequests:
-        st.sidebar.error("Rate limited. Please wait a few minutes.")
+        st.sidebar.error("""
+        Rate limited. Basic tier limitations:
+        - Wait at least 1 minute between requests
+        - Maximum 1,500 tweets per month
+        """)
+    except tweepy.Unauthorized:
+        st.sidebar.error("Authentication failed. Check API credentials.")
     except Exception as e:
         st.sidebar.error(f"Twitter API Error: {str(e)}")
     
