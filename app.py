@@ -5,12 +5,12 @@ from datetime import datetime, timedelta
 import time
 
 # Configure API keys
-twitter_bearer_token = st.secrets["AAAAAAAAAAAAAAAAAAAAADRmzAEAAAAAfFwYHNIvEMGkqft0EJugHh3%2BT7s%3Dv9lq8e1VEBfZNdoDsgvGKq2ErPE1qibYtFXbTsAh84tim3beqX"]
+twitter_bearer_token = st.secrets["TWITTER_BEARER_TOKEN"]
 twitter_api_key = st.secrets["CaSx2wfSV8mHC4yrxroEliNht"]
-twitter_api_secret = st.secrets["CY6b74Cag3k2Q6iEZ4PEvCSkiByCHzvDX2hGtxjxI1d2Qjn1r8"]
-twitter_access_token = st.secrets["1872275420386611200-67Yrv49o4CFlSAhCTau4tvMhuCb4OB"]
-twitter_access_token_secret = st.secrets["GYmTWhx4ZLKSlUAuYtQbPrEj1S3Obf16utkM7b0Z7DTgp"]
-openai_api_key = st.secrets["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"]
+twitter_api_secret = st.secrets["TWITTER_API_SECRET"]
+twitter_access_token = st.secrets["TWITTER_ACCESS_TOKEN"]
+twitter_access_token_secret = st.secrets["TWITTER_ACCESS_TOKEN_SECRET"]
+openai_api_key = st.secrets["OPENAI_API_KEY"]
 
 # Initialize Twitter client
 client = tweepy.Client(
