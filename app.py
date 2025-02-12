@@ -395,15 +395,26 @@ def main():
     else:
         st.warning("Please login first to use the tool.")
 
-    # Save session before shutdown
-    save_session_cookies()
+    # Modify the cleanup section at the end of main()
+    if 'cleanup_flag' not in st.session_state:
+        st.session_state.cleanup_flag = False
 
-    # Cleanup on app shutdown
-    def cleanup():
+    if st.session_state.cleanup_flag:
         if 'driver' in st.session_state:
-            st.session_state.driver.quit()
-    
-    st.on_script_run_end(cleanup)
+            try:
+                st.session_state.driver.quit()
+                del st.session_state.driver
+            except:
+                pass
+        st.session_state.cleanup_flag = False
+
+    # Add this to sidebar
+    with st.sidebar:
+        if st.button("Reset Session"):
+            st.session_state.cleanup_flag = True
+            st.session_state.logged_in = False
+            st.session_state.twitter_cookies = None
+            st.experimental_rerun()
 
 if __name__ == "__main__":
     main() 
